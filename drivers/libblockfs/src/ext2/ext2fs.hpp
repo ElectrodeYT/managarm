@@ -478,13 +478,23 @@ struct Inode final : BaseInode, std::enable_shared_from_this<Inode> {
 // --------------------------------------------------------
 
 struct BlockGroupDescriptorTable {
-	inline void init(std::byte *ptr, uint16_t descriptorSize) {
-		ptr_ = ptr;
+	inline void init(std::vector<MetadataCache::BlockWindow> blocks,
+			size_t blockSize, uint16_t descriptorSize) {
+		blocks_ = std::move(blocks);
+		blockSize_ = blockSize;
+		assert(descriptorSize && !(blockSize % descriptorSize));
 		descriptorSize_ = descriptorSize;
 	}
 
 	inline DiskGroupDesc& operator[](size_t index) {
-		return *reinterpret_cast<DiskGroupDesc *>(ptr_ + index * descriptorSize_);
+		auto offset = index * descriptorSize_;
+		auto ptr = static_cast<std::byte *>(blocks_[offset / blockSize_].get());
+		return *reinterpret_cast<DiskGroupDesc *>(ptr + offset % blockSize_);
+	}
+
+	// Call after updating a descriptor through its long-lived cache window.
+	void markDirty(size_t index) {
+		blocks_[index * descriptorSize_ / blockSize_].markDirty();
 	}
 
 	uint16_t descriptorSize() const {
@@ -492,7 +502,8 @@ struct BlockGroupDescriptorTable {
 	}
 
 private:
-	std::byte *ptr_;
+	std::vector<MetadataCache::BlockWindow> blocks_;
+	size_t blockSize_;
 	uint16_t descriptorSize_;
 };
 
@@ -514,12 +525,14 @@ struct FileSystem final : BaseFileSystem {
 
 	async::result<void> init();
 
-	async::detached handleBgdtWriteback();
-
 	std::shared_ptr<BaseInode> accessRoot() override;
 	std::shared_ptr<BaseInode> accessInode(uint32_t number) override;
 	async::result<std::shared_ptr<BaseInode>> createRegular(int uid, int gid, uint32_t parentIno) override;
 	protocols::fs::FsStats getFsStats() override;
+	async::result<protocols::fs::Error>
+	synchronize(protocols::fs::SynchronizeFlags flags) override;
+	async::result<protocols::fs::Error> synchronize(std::shared_ptr<Inode> inode,
+			protocols::fs::SynchronizeFlags flags);
 
 	async::result<std::shared_ptr<Inode>> createDirectory();
 	async::result<std::shared_ptr<Inode>> createSymlink();
@@ -568,6 +581,8 @@ struct FileSystem final : BaseFileSystem {
 	// Callers must hold inode->blockMapMutex.
 	async::result<void> writeDataBlocks(const std::vector<BlockRange> &ranges,
 			arch::dma_buffer_view buf);
+	async::result<void> synchronizeFileData(Inode *inode);
+	async::result<void> synchronizeMetadata();
 
 
 	// Callers must hold inode->blockMapMutex (shared or exclusive).
@@ -623,6 +638,10 @@ struct FileSystem final : BaseFileSystem {
 	uint32_t inodesCount;
 	uint8_t uuid[16];
 
+	// We use one cache of metadata blocks per block group.
+	// This allows multiple block groups to be served in parallel on helix::DispatcherPool.
+	std::vector<std::unique_ptr<MetadataCache>> metadataCaches;
+
 	// Mutable fields are protected by allocationMutex. These are:
 	// - freeBlocksCount
 	// - freeInodesCount
@@ -633,8 +652,7 @@ struct FileSystem final : BaseFileSystem {
 	// - blockBitmapCsumHigh
 	// - inodeBitmapCsumHigh
 	// All other fields are immutable.
-	arch::dma_buffer blockGroupDescriptorBuffer;
-	// View of blockGroupDescriptorBuffer; same locking as above.
+	// Descriptors are pinned in the metadata cache for the filesystem lifetime.
 	BlockGroupDescriptorTable bgdt;
 
 	uint32_t metadataChecksumSeed;
@@ -643,17 +661,13 @@ struct FileSystem final : BaseFileSystem {
 	bool metadataChecksum;
 	bool bgdtChecksum;
 
-	// We use one cache of metadata blocks per block group.
-	// This allows multiple block groups to be served in parallel on helix::DispatcherPool.
-	std::vector<std::unique_ptr<MetadataCache>> metadataCaches;
-
 	std::mutex activeInodesMutex;
 
 	// Serializes block/inode allocation and BGDT modifications.
 	async::mutex allocationMutex;
 
-	// Raised to request a writeback of the block group descriptor table.
-	async::sequenced_event bgdtWriteback;
+	// Serializes filesystem-wide and per-inode synchronization sequences.
+	async::mutex synchronizeMutex;
 
 	// Protected by activeInodesMutex.
 	std::unordered_map<uint32_t, std::weak_ptr<Inode>> activeInodes;
@@ -679,4 +693,3 @@ static_assert(blockfs::File<OpenFile>);
 static_assert(blockfs::FileSystem<FileSystem>);
 
 } } // namespace blockfs::ext2fs
-
