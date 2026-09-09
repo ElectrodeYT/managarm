@@ -305,45 +305,79 @@ void MetadataCache::markDirty_(uint64_t block) {
 }
 
 async::result<void> MetadataCache::flushDirty_() {
-	// Blocks dirtied while a batch is being synchronized are picked up by the next iteration.
 	uint64_t seenSeq = 0;
-	std::vector<uint64_t> batch;
 	while(true) {
 		co_await dirtyEvent_.async_wait(seenSeq);
 
-		protocols::ostrace::Timer timer;
-		uint64_t numRedundant;
 		{
 			std::lock_guard dirtyLock{dirtyMutex_};
-
-			// Take the sequence together with the batch, so that no request is missed.
+			// Take the sequence before consuming the batch, so no request is missed.
 			// TODO: Use async::sequenced_event::current_sequence() once it exists.
 			seenSeq = dirtyEvent_.next_sequence() - 1;
-			batch.assign(dirtyBlocks_.begin(), dirtyBlocks_.end());
-			dirtyBlocks_.clear();
-			numRedundant = numRedundantDirty_;
-			numRedundantDirty_ = 0;
+			flushingDirty_ = true;
 		}
-		auto numBlocks = batch.size();
-
-		auto frameSize = size_t{1} << blockPagesShift_;
-		protocols::ostrace::Timer cleanTimer;
-		for(auto block : batch) {
-			auto synchronize = co_await helix_ng::synchronizeSpace(
-					helix::BorrowedDescriptor{kHelNullHandle},
-					blockAddress_(block), frameSize);
-			HEL_CHECK(synchronize.error());
+		co_await writebackDirty_();
+		{
+			std::lock_guard dirtyLock{dirtyMutex_};
+			flushingDirty_ = false;
 		}
-		auto cleanTime = cleanTimer.elapsed();
-
-		ostContext.emit(
-			ostEvtMetadataClean,
-			ostAttrTime(timer.elapsed()),
-			ostAttrNumBlocks(numBlocks),
-			ostAttrNumRedundant(numRedundant),
-			ostAttrTimeCleanPages(cleanTime)
-		);
+		dirtyDrainedEvent_.raise();
 	}
+}
+
+async::result<void> MetadataCache::synchronize() {
+	while(true) {
+		uint64_t seenSeq;
+		{
+			std::lock_guard dirtyLock{dirtyMutex_};
+			// Observe the event before checking the queue to avoid missing completion.
+			seenSeq = dirtyDrainedEvent_.next_sequence() - 1;
+			if(dirtyBlocks_.empty() && !flushingDirty_)
+				break;
+		}
+		co_await dirtyDrainedEvent_.async_wait(seenSeq);
+	}
+
+	auto writeback = co_await helix_ng::writebackFence(
+			backing_, 0, numBlocks_ << blockPagesShift_);
+	HEL_CHECK(writeback.error());
+}
+
+async::result<void> MetadataCache::writebackDirty_() {
+	// Blocks dirtied while this batch is being synchronized remain queued for
+	// the next deferred writeback.
+	std::vector<uint64_t> batch;
+	uint64_t numRedundant;
+	{
+		std::lock_guard dirtyLock{dirtyMutex_};
+		batch.assign(dirtyBlocks_.begin(), dirtyBlocks_.end());
+		dirtyBlocks_.clear();
+		numRedundant = numRedundantDirty_;
+		numRedundantDirty_ = 0;
+	}
+
+	auto numBlocks = batch.size();
+	if(!numBlocks && !numRedundant)
+		co_return;
+
+	protocols::ostrace::Timer timer;
+	auto frameSize = size_t{1} << blockPagesShift_;
+	protocols::ostrace::Timer cleanTimer;
+	for(auto block : batch) {
+		auto synchronize = co_await helix_ng::synchronizeSpace(
+				helix::BorrowedDescriptor{kHelNullHandle},
+				blockAddress_(block), frameSize);
+		HEL_CHECK(synchronize.error());
+	}
+	auto cleanTime = cleanTimer.elapsed();
+
+	ostContext.emit(
+		ostEvtMetadataClean,
+		ostAttrTime(timer.elapsed()),
+		ostAttrNumBlocks(numBlocks),
+		ostAttrNumRedundant(numRedundant),
+		ostAttrTimeCleanPages(cleanTime)
+	);
 }
 
 } // namespace blockfs

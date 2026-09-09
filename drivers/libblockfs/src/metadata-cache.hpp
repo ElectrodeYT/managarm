@@ -142,6 +142,10 @@ public:
 	// Precondition: no BlockWindow of the block is alive.
 	async::result<void> forget(uint64_t block);
 
+	// Synchronise the cache with the underlying block device.
+	// Also waits for the actual writeback to complete.
+	async::result<void> synchronize();
+
 private:
 	async::result<void> run_();
 	async::result<void> manage_();
@@ -159,6 +163,7 @@ private:
 	void destroyCacheBlock_(CacheBlock *cacheBlock);
 	void markDirty_(uint64_t block);
 	async::result<void> flushDirty_();
+	async::result<void> writebackDirty_();
 
 	BlockDevice *device_;
 	uint64_t baseBlock_;
@@ -198,6 +203,10 @@ private:
 	uint64_t numRedundantDirty_ = 0;
 	// Raised to request a writeback of dirtyBlocks_.
 	async::sequenced_event dirtyEvent_;
+	// Includes the batch removed from dirtyBlocks_ until synchronizeSpace() completes.
+	// Protected by dirtyMutex_.
+	bool flushingDirty_ = false;
+	async::sequenced_event dirtyDrainedEvent_;
 };
 
 inline void *MetadataCache::BlockWindow::get() {
