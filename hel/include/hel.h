@@ -960,6 +960,7 @@ struct HelSqForkMemory {
 };
 
 //! SQ data for kHelSubmitWritebackFence.
+//! Collects dirty pages from mappings of the range and waits for writeback to complete.
 struct HelSqWritebackFence {
 	//! Handle to the memory object.
 	HelHandle handle;
