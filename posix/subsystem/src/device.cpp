@@ -1,3 +1,4 @@
+#include "device-write.hpp"
 
 #include <string.h>
 
@@ -128,14 +129,7 @@ private:
 
 	async::result<frg::expected<Error, size_t>>
 	writeAll(Process *, const void *data, size_t length) override {
-		size_t progress = 0;
-		while(progress < length) {
-			size_t chunk = co_await _file.writeSome(
-					reinterpret_cast<const char *>(data) + progress,
-					length - progress);
-			progress += chunk;
-		}
-		co_return length;
+		co_return co_await posix::detail::writeDeviceAll<Error>(_file, data, length, toPosixError);
 	}
 
 	async::result<frg::expected<Error, PollWaitResult>> pollWait(Process *,
