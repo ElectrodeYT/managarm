@@ -20,6 +20,7 @@
 #include "file.hpp"
 #include "process.hpp"
 #include "pts.hpp"
+#include "pts-read.hpp"
 #include "fs.bragi.hpp"
 
 #include <bitset>
@@ -1241,46 +1242,9 @@ async::result<std::expected<size_t, Error>>
 SlaveFile::readSome(Process *, void *data, size_t maxLength, async::cancellation_token ce) {
 	if(logReadWrite)
 		std::cout << "posix: Read from tty " << structName() << std::endl;
-	if(!maxLength)
-		co_return std::unexpected{Error::eof};
-
-	{
-		std::lock_guard lock{_channel->mutex};
-		if(_channel->masterCount == 0)
-			co_return std::unexpected{Error::eof};
-	}
-
-	while(true) {
-		{
-			std::lock_guard lock{_channel->mutex};
-			if(!_channel->slaveQueue.empty()) {
-				auto packet = &_channel->slaveQueue.front();
-				auto chunk = std::min(packet->buffer.size() - packet->offset, maxLength);
-				if(chunk)
-					memcpy(data, packet->buffer.data() + packet->offset, chunk);
-				packet->offset += chunk;
-				if(packet->offset == packet->buffer.size())
-					_channel->slaveQueue.pop_front();
-				co_return chunk;
-			}
-
-			if(nonBlock_){
-				if(logReadWrite)
-					std::cout << "posix: tty would block" << std::endl;
-				co_return std::unexpected{Error::wouldBlock};
-			}
-		}
-
-		auto waitResult = co_await _channel->statusBell.async_wait_if([&] {
-			std::lock_guard lock{_channel->mutex};
-			return _channel->slaveQueue.empty();
-		}, ce);
-		if (!waitResult) {
-			if (logReadWrite)
-				std::cout << "posix: tty read interrupted" << std::endl;
-			co_return std::unexpected{Error::interrupted};
-		}
-	}
+	co_return co_await detail::readSlaveQueue<Error>(
+	    *_channel, nonBlock_, data, maxLength, ce, logReadWrite
+	);
 }
 
 async::result<frg::expected<Error, size_t>>
