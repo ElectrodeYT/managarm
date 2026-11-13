@@ -4,3 +4,6 @@ subprojects
 .clangd
 compile_commands.json
 Cargo.lock
+
+# Cargo build output.
+target/
