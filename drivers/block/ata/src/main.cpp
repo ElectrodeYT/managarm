@@ -21,6 +21,9 @@
 namespace {
 	constexpr bool logIrqs = false;
 	constexpr bool logRequests = false;
+    // PIO uses CPU buffers; no device DMA address space is attached to this realm.
+    arch::dma_realm pioRealm;
+    arch::contiguous_pool pioPool{&pioRealm, {.addressBits = 64, .allocateContigous = false}};
 }
 
 // --------------------------------------------------------
@@ -133,7 +136,7 @@ Controller::Controller(
     helix::UniqueDescriptor irq
 )
 // PIO transfers one command at a time; the sector count register holds up to 255 sectors.
-: BlockDevice{512, parentId, nullptr, {.maxSectorsPerRequest = 255, .queueCapacity = 1}},
+: BlockDevice{512, parentId, &pioPool, {.maxSectorsPerRequest = 255, .queueCapacity = 1}},
   _irq{std::move(irq)},
   _ioSpace{mainOffset},
   _altSpace{altOffset},
