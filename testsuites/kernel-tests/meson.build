@@ -2,6 +2,7 @@ executable('kernel-tests',
 	[
 		'src/main.cpp',
 		'src/clock.cpp',
+		'src/dtb.cpp',
 		'src/ata.cpp',
 		'src/faults.cpp',
 		'src/mapping.cpp',
@@ -10,6 +11,6 @@ executable('kernel-tests',
 		'src/sequenced-events.cpp',
 		'src/swap.cpp',
 	],
-	dependencies: [ helix_dep, core_dep ],
+	dependencies: [ helix_dep, core_dep, libarch_base ],
 	install : true
 )

@@ -301,9 +301,13 @@ impl<'a> DeviceTreeNode<'a> {
     }
 
     pub fn properties(&self) -> PropertyIter<'a> {
+        // Empty property lists can begin with padding before a child or END_NODE.
+        let mut ptr = self.prop_off;
+        read_tag(self.tree.data, &mut ptr);
+        ptr -= 4;
         PropertyIter {
             tree: self.tree,
-            ptr: self.prop_off,
+            ptr,
             end: self.node_off,
         }
     }
@@ -343,5 +347,81 @@ impl<'a> Iterator for PropertyIter<'a> {
             name,
             data: prop_data,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DeviceTree;
+
+    fn word(data: &mut Vec<u8>, value: u32) {
+        data.extend_from_slice(&value.to_be_bytes());
+    }
+
+    fn property(data: &mut Vec<u8>, name: u32, value: u32) {
+        for value in [3, 4, name, value] {
+            word(data, value);
+        }
+    }
+
+    fn fixture(mode: u32) -> Vec<u8> {
+        let mut data = vec![0; 56];
+        word(&mut data, 1);
+        word(&mut data, 0);
+        if mode & 2 != 0 {
+            word(&mut data, 4);
+            word(&mut data, 4);
+        }
+        if mode & 1 != 0 {
+            property(&mut data, 0, 42);
+            if mode & 4 != 0 {
+                word(&mut data, 4);
+            }
+            property(&mut data, 6, 43);
+        }
+        if mode & 8 != 0 {
+            word(&mut data, 4);
+        }
+        if mode & 16 != 0 {
+            word(&mut data, 1);
+            data.extend_from_slice(b"child\0");
+            while data.len() % 4 != 0 {
+                data.push(0);
+            }
+            property(&mut data, 6, 99);
+            word(&mut data, 2);
+        }
+        word(&mut data, 2);
+        word(&mut data, 9);
+        let strings = data.len();
+        data.extend_from_slice(b"first\0second\0");
+        for (offset, value) in [
+            (0, 0xd00dfeed), (4, data.len() as u32), (8, 56),
+            (12, strings as u32), (16, 40), (20, 17), (24, 16),
+            (32, 13), (36, (strings - 56) as u32),
+        ] {
+            data[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
+        }
+        data
+    }
+
+    #[test]
+    fn properties_skip_padding_and_stop_at_children() {
+        for mode in 0..32 {
+            let data = fixture(mode);
+            let tree = DeviceTree::new(&data);
+            let root = tree.root_node();
+            let props = root.properties().collect::<Vec<_>>();
+            if mode & 1 != 0 {
+                assert_eq!(props.len(), 2);
+                assert_eq!(props[0].name(), "first");
+                assert_eq!(props[0].access().read_cells(1), Some(42));
+                assert_eq!(props[1].name(), "second");
+                assert_eq!(props[1].access().read_cells(1), Some(43));
+            } else {
+                assert!(props.is_empty());
+                assert!(root.find_property("second").is_none());
+            }
+        }
     }
 }

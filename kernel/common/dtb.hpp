@@ -477,7 +477,13 @@ struct DeviceTreeNode {
 		  end_{tree, end} {}
 
 		struct Iterator {
-			Iterator(DeviceTree *tree, std::byte *ptr) : tree_{tree}, ptr_{ptr} {}
+			Iterator(DeviceTree *tree, std::byte *ptr) : tree_{tree}, ptr_{ptr} {
+				// Normalize padding before the first property or an empty list's end.
+				if (ptr_) {
+					detail::readTag(ptr_);
+					ptr_ -= 4;
+				}
+			}
 
 			bool operator==(const Iterator &other) const = default;
 
