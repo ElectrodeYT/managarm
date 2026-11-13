@@ -56,7 +56,7 @@ initgraph::Task detectCpusFromDtb{
 		    cpuConfig.totalCpus = cpuCount;
 
 		    auto log = infoLogger();
-		    log << "eir: Detected " << cpuCount << " CPUs from MADT";
+		    log << "eir: Detected " << cpuCount << " CPUs from DT";
 		    if (cpuCount != effectiveCpus)
 			    log << " (but only using " << effectiveCpus << " CPUs)";
 		    log << frg::endlog;
