@@ -74,14 +74,15 @@ async::result<bool> Cmdline::dumpKernelLogs(frg::string_view driver) {
 
 	// poor man's tokenizer
 	while(next_item < dump.size()) {
-		if(next_item == dump.size() - 1)
-			break;
-
 		auto next_comma = dump.find_first(',', next_item);
+		if (next_comma == size_t(-1))
+			next_comma = dump.size();
 
 		if(dump.sub_string(next_item, next_comma - next_item) == driver)
 			co_return true;
 
+		if (next_comma == dump.size())
+			break;
 		next_item = next_comma + 1;
 	}
 
