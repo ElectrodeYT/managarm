@@ -46,6 +46,7 @@ namespace regs {
 
 namespace alt_regs {
 	inline constexpr arch::scalar_register<uint8_t> inStatus{0};
+    inline constexpr arch::scalar_register<uint8_t> outControl{0};
 }
 
 class Controller : public blockfs::BlockDevice {
@@ -298,6 +299,8 @@ void Controller::_selectDevice(uint8_t device) {
 }
 
 async::result<bool> Controller::_detectDevice() {
+	// Clear nIEN before issuing IDENTIFY, whose completion is interrupt-driven.
+	_altSpace.store(alt_regs::outControl, uint8_t{0});
 	_selectDevice(kDeviceLba);
 
 	// TODO: Detect ATAPI drives.
