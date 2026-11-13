@@ -71,6 +71,7 @@ namespace uart_register {
 	arch::bit_register<uint8_t> fifoControl(2);
 	arch::bit_register<uint8_t> lineControl(3);
 	arch::bit_register<uint8_t> lineStatus(5);
+    arch::scalar_register<uint8_t> modemControl(4);
 }
 
 namespace irq_enable {
@@ -101,3 +102,9 @@ namespace irq_ident_register {
 	arch::field<uint8_t, bool> ignore(0, 1);
 	arch::field<uint8_t, IrqIds> id(1, 3);
 }
+
+namespace modem_control {
+constexpr uint8_t dtr = 1;
+constexpr uint8_t rts = 2;
+constexpr uint8_t out2 = 8;
+} // namespace modem_control

@@ -395,6 +395,13 @@ int main() {
 
 	base = arch::global_io.subspace(COM1);
 
+	// Clear DLAB before masking IER; firmware may have left it set.
+	base.store(
+	    uart_register::lineControl,
+	    base.load(uart_register::lineControl) / line_control::dlab(false)
+	);
+	base.store(uart_register::irqEnable, arch::bit_value<uint8_t>{0});
+
 	// Perform general initialization.
 	base.store(uart_register::fifoControl,
 			fifo_control::fifoEnable(FifoCtrl::enable)
@@ -403,12 +410,6 @@ int main() {
 	// Wait for the FIFO to become empty.
 	while(!(base.load(uart_register::lineStatus) & line_status::txReady))
 		; // Busy spin for now.
-
-	// Enable IRQs.
-	base.store(uart_register::irqEnable,
-			irq_enable::dataAvailable(IrqCtrl::enable)
-			| irq_enable::txEmpty(IrqCtrl::enable)
-			| irq_enable::lineStatus(IrqCtrl::enable));
 
 	// Set the baud rate.
 	base.store(uart_register::lineControl, line_control::dlab(true));
@@ -420,6 +421,19 @@ int main() {
 			| line_control::stopBit(StopBits::one)
 			| line_control::parityBits(Parity::none)
 			| line_control::dlab(false));
+
+	// OUT2 gates the ISA UART interrupt; assert the modem handshake lines too.
+	base.store(
+	    uart_register::modemControl,
+	    uint8_t{modem_control::dtr | modem_control::rts | modem_control::out2}
+	);
+
+	// Enable IRQs.
+	base.store(
+	    uart_register::irqEnable,
+	    irq_enable::dataAvailable(IrqCtrl::enable) | irq_enable::txEmpty(IrqCtrl::enable)
+	        | irq_enable::lineStatus(IrqCtrl::enable)
+	);
 
 	handleIrqs();
 	runTerminal();
