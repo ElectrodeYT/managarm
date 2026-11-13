@@ -1,5 +1,5 @@
 
-ACTION=="add", SUBSYSTEM=="platform", DEVPATH=="*/freestanding-fb?*", RUN+="/usr/bin/runsvr run /usr/lib/managarm/server/gfx-plainfb.bin", GOTO="managarm_vga_end"
+ACTION=="add", SUBSYSTEM=="platform", DEVPATH=="*/freestanding-fb?*", TEST=="/usr/lib/managarm/server/gfx-plainfb.bin", RUN+="/usr/bin/runsvr run /usr/lib/managarm/server/gfx-plainfb.bin", GOTO="managarm_vga_end"
 
 ACTION!="add", GOTO="managarm_vga_end"
 SUBSYSTEM!="pci", GOTO="managarm_vga_end"
@@ -8,18 +8,18 @@ IMPORT{cmdline}="plainfb.force"
 IMPORT{cmdline}="gfx.vm"
 ENV{plainfb.force}=="1", GOTO="managarm_vga_forceplain"
 
-ATTR{vendor}=="0x10de", ATTR{class}=="0x030000", RUN+="/usr/bin/runsvr --fork bind /usr/lib/managarm/server/gfx-nvidia-open.bin", GOTO="managarm_vga_end"
+ATTR{vendor}=="0x10de", ATTR{class}=="0x030000", TEST=="/usr/lib/managarm/server/gfx-nvidia-open.bin", RUN+="/usr/bin/runsvr --fork bind /usr/lib/managarm/server/gfx-nvidia-open.bin", GOTO="managarm_vga_end"
 
-ATTR{vendor}=="0x8086", ATTR{class}=="0x030000", ATTR{device}=="0x0166|0x3184|0x3185|0x3e9b|0x5916|0x5917", RUN+="/usr/bin/runsvr --fork bind /usr/lib/managarm/server/gfx-intel-lil.bin", GOTO="managarm_vga_end"
+ATTR{vendor}=="0x8086", ATTR{class}=="0x030000", ATTR{device}=="0x0166|0x3184|0x3185|0x3e9b|0x5916|0x5917", TEST=="/usr/lib/managarm/server/gfx-intel-lil.bin", RUN+="/usr/bin/runsvr --fork bind /usr/lib/managarm/server/gfx-intel-lil.bin", GOTO="managarm_vga_end"
 
 ENV{gfx.vm}=="0", GOTO="managarm_vga_forceplain"
-ATTR{vendor}=="0x1234", ATTR{device}=="0x1111", RUN+="/usr/bin/runsvr --fork run /usr/lib/managarm/server/gfx-bochs.bin", GOTO="managarm_vga_end"
-ATTR{vendor}=="0x1af4", ATTR{device}=="0x1050", RUN+="/usr/bin/runsvr --fork bind /usr/lib/managarm/server/gfx-virtio.bin", GOTO="managarm_vga_end"
-ATTR{vendor}=="0x15ad", ATTR{device}=="0x0405", RUN+="/usr/bin/runsvr --fork bind /usr/lib/managarm/server/gfx-vmware.bin", GOTO="managarm_vga_end"
+ATTR{vendor}=="0x1234", ATTR{device}=="0x1111", TEST=="/usr/lib/managarm/server/gfx-bochs.bin", RUN+="/usr/bin/runsvr --fork run /usr/lib/managarm/server/gfx-bochs.bin", GOTO="managarm_vga_end"
+ATTR{vendor}=="0x1af4", ATTR{device}=="0x1050", TEST=="/usr/lib/managarm/server/gfx-virtio.bin", RUN+="/usr/bin/runsvr --fork bind /usr/lib/managarm/server/gfx-virtio.bin", GOTO="managarm_vga_end"
+ATTR{vendor}=="0x15ad", ATTR{device}=="0x0405", TEST=="/usr/lib/managarm/server/gfx-vmware.bin", RUN+="/usr/bin/runsvr --fork bind /usr/lib/managarm/server/gfx-vmware.bin", GOTO="managarm_vga_end"
 
 LABEL="managarm_vga_forceplain"
 ATTR{owns_plainfb}!="1", GOTO="managarm_vga_end"
 ENV{plainfb.force}=="0", GOTO="managarm_vga_end"
-RUN += "/usr/bin/runsvr run /usr/lib/managarm/server/gfx-plainfb.bin"
+TEST=="/usr/lib/managarm/server/gfx-plainfb.bin", RUN += "/usr/bin/runsvr run /usr/lib/managarm/server/gfx-plainfb.bin"
 
 LABEL="managarm_vga_end"
