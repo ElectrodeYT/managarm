@@ -88,9 +88,10 @@ initgraph::Task parseSpcrDbg2{
 			        reinterpret_cast<char *>(info) + info->base_address_register_offset
 			    );
 
-			    infoLogger() << "eir: DBG2 UART subtype " << info->port_subtype
-			                 << ", address space: 0x" << frg::hex_fmt{gas->address_space_id}
-			                 << ", base: 0x" << frg::hex_fmt{gas->address} << frg::endlog;
+			    infoLogger() << "eir: DBG2 UART subtype "
+			                 << static_cast<unsigned>(info->port_subtype) << ", address space: 0x"
+			                 << frg::hex_fmt{gas->address_space_id} << ", base: 0x"
+			                 << frg::hex_fmt{gas->address} << frg::endlog;
 
 			    uart::initFromAcpi(acpiUart, info->port_subtype, *gas);
 
