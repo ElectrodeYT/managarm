@@ -18,6 +18,8 @@
 
 #include <blockfs.hpp>
 
+#include "command.hpp"
+
 namespace {
 	constexpr bool logIrqs = false;
 	constexpr bool logRequests = false;
@@ -96,7 +98,7 @@ private:
 		kStatusBsy = 0x80,
 
 		kDeviceSlave = 0x10,
-		kDeviceLba = 0x40
+		kDeviceLba = ata::masterLbaDevice
 	};
 
 	enum class RequestType { read, write, flush };
@@ -231,7 +233,9 @@ auto Controller::_waitForBsyIrq() -> async::result<IoResult> {
 }
 
 async::result<std::expected<void, blockfs::Error>> Controller::issueRead(unsigned int, uint64_t sector, arch::dma_buffer_view view) {
-	auto numSectors = (view.size() + sectorSize - 1) >> sectorShift;
+	auto numSectors = view.size() / sectorSize;
+	if (!ata::validRequest(sector, view.size(), _supportsLBA48))
+		co_return std::unexpected{blockfs::Error::ioError};
 
 	Request request{};
 	request.type = RequestType::read;
@@ -247,7 +251,9 @@ async::result<std::expected<void, blockfs::Error>> Controller::issueRead(unsigne
 }
 
 async::result<std::expected<void, blockfs::Error>> Controller::issueWrite(unsigned int, uint64_t sector, arch::dma_buffer_view view) {
-	auto numSectors = (view.size() + sectorSize - 1) >> sectorShift;
+	auto numSectors = view.size() / sectorSize;
+	if (!ata::validRequest(sector, view.size(), _supportsLBA48))
+		co_return std::unexpected{blockfs::Error::ioError};
 
 	Request request{};
 	request.type = RequestType::write;
@@ -360,10 +366,10 @@ async::result<void> Controller::_performRequest(Request *request) {
 		std::cout << "block/ata: Reading/writing " << request->numSectors
 				<< " sectors from " << request->sector << std::endl;
 
-	assert(!(request->sector & ~((size_t(1) << 48) - 1)));
+	assert(request->sector < (uint64_t{1} << 48));
 	assert(request->numSectors <= 255);
 
-	_ioSpace.store(regs::outDevice, kDeviceLba);
+	_ioSpace.store(regs::outDevice, ata::deviceRegister(request->sector, _supportsLBA48));
 	// TODO: There should be a 400ns delay after drive selection.
 
 	if (request->type == RequestType::flush) {

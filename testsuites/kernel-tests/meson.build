@@ -2,6 +2,7 @@ executable('kernel-tests',
 	[
 		'src/main.cpp',
 		'src/clock.cpp',
+		'src/ata.cpp',
 		'src/faults.cpp',
 		'src/mapping.cpp',
 		'src/memory.cpp',
