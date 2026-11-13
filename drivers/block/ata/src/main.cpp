@@ -236,7 +236,8 @@ auto Controller::_waitForBsyIrq() -> async::result<IoResult> {
 
 async::result<std::expected<void, blockfs::Error>> Controller::issueRead(unsigned int, uint64_t sector, arch::dma_buffer_view view) {
 	auto numSectors = view.size() / sectorSize;
-	if (!ata::validRequest(sector, view.size(), _supportsLBA48))
+	if (!ata::validRequest(sector, view.size(), _supportsLBA48)
+	    || !ata::contains(sector, numSectors, size / sectorSize))
 		co_return std::unexpected{blockfs::Error::ioError};
 
 	Request request{};
@@ -254,7 +255,8 @@ async::result<std::expected<void, blockfs::Error>> Controller::issueRead(unsigne
 
 async::result<std::expected<void, blockfs::Error>> Controller::issueWrite(unsigned int, uint64_t sector, arch::dma_buffer_view view) {
 	auto numSectors = view.size() / sectorSize;
-	if (!ata::validRequest(sector, view.size(), _supportsLBA48))
+	if (!ata::validRequest(sector, view.size(), _supportsLBA48)
+	    || !ata::contains(sector, numSectors, size / sectorSize))
 		co_return std::unexpected{blockfs::Error::ioError};
 
 	Request request{};
@@ -286,10 +288,7 @@ async::result<std::expected<void, blockfs::Error>> Controller::flush() {
 	co_return {};
 }
 
-async::result<size_t> Controller::getSize() {
-	std::cout << "ata: Controller::getSize() is a stub!" << std::endl;
-	co_return 0;
-}
+async::result<size_t> Controller::getSize() { co_return size; }
 
 void Controller::_selectDevice(uint8_t device) {
 	_ioSpace.store(regs::outDevice, device);
@@ -350,8 +349,13 @@ async::result<bool> Controller::_detectDevice() {
 		model[i + 1] = tmp;
 	}
 
-	_supportsLBA48 = (ident_data[167] & (1 << 2))
-			&& (ident_data[173] & (1 << 2));
+	auto identification = ata::identify(ident_data);
+	if (!identification) {
+		std::cout << "block/ata: Unsupported or invalid IDENTIFY geometry" << std::endl;
+		co_return false;
+	}
+	_supportsLBA48 = identification->lba48;
+	size = identification->sectors * sectorSize;
 
 	auto word = [&](size_t index) -> uint16_t {
 		return ident_data[index * 2] | (uint16_t{ident_data[index * 2 + 1]} << 8);
