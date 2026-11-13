@@ -114,6 +114,7 @@ private:
 	async::result<void> _performRequest(Request *request);
 
 	async::result<bool> _detectDevice();
+	void _selectDevice(uint8_t device);
 
 	std::queue<Request *> _requestQueue;
 	async::recurring_event _doorbell;
@@ -289,9 +290,15 @@ async::result<size_t> Controller::getSize() {
 	co_return 0;
 }
 
+void Controller::_selectDevice(uint8_t device) {
+	_ioSpace.store(regs::outDevice, device);
+	// Four alternate-status reads provide the device-selection settling delay.
+	for (int i = 0; i < 4; ++i)
+		(void)_altSpace.load(alt_regs::inStatus);
+}
+
 async::result<bool> Controller::_detectDevice() {
-	_ioSpace.store(regs::outDevice, kDeviceLba);
-	// TODO: delay
+	_selectDevice(kDeviceLba);
 
 	// TODO: Detect ATAPI drives.
 	// For ATAPI drives, we do not need to wait until RDY is set.
@@ -369,8 +376,7 @@ async::result<void> Controller::_performRequest(Request *request) {
 	assert(request->sector < (uint64_t{1} << 48));
 	assert(request->numSectors <= 255);
 
-	_ioSpace.store(regs::outDevice, ata::deviceRegister(request->sector, _supportsLBA48));
-	// TODO: There should be a 400ns delay after drive selection.
+	_selectDevice(ata::deviceRegister(request->sector, _supportsLBA48));
 
 	if (request->type == RequestType::flush) {
 		_ioSpace.store(regs::outCommand, _flushCommand);
