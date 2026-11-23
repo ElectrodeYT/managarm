@@ -17,6 +17,7 @@ src = [
 	'src/memfd.cpp',
 	'src/pidfd.cpp',
 	'src/socket.cpp',
+	'src/tcp-state.cpp',
 	'src/timerfd.cpp',
 	'src/posix-timers.cpp',
 	'src/eventfd.cpp',
