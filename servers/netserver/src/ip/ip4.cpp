@@ -383,7 +383,7 @@ auto Ip4::classifyAddress(uint32_t addr) -> AddressType {
 }
 
 async::result<protocols::fs::Error> Ip4::sendFrame(Ip4TargetInfo ti,
-		void *data, size_t len, uint16_t proto) {
+		void *data, size_t len, uint16_t proto, async::cancellation_token cancellation) {
 	using arch::convert_endian;
 	using arch::endian;
 
@@ -408,7 +408,9 @@ async::result<protocols::fs::Error> Ip4::sendFrame(Ip4TargetInfo ti,
 			macTarget = ti.remote;
 		}
 
-		mac = co_await neigh4().tryResolve(macTarget, ti.source);
+		mac = co_await neigh4().tryResolve(macTarget, ti.source, cancellation);
+		if(cancellation.is_cancellation_requested())
+			co_return protocols::fs::Error::interrupted;
 		if (!mac) {
 			co_return protocols::fs::Error::hostUnreachable;
 		}
@@ -455,6 +457,8 @@ async::result<protocols::fs::Error> Ip4::sendFrame(Ip4TargetInfo ti,
 
 	size_t progress = 0;
 	do {
+		if(cancellation.is_cancellation_requested())
+			co_return protocols::fs::Error::interrupted;
 		size_t fragmentLength = std::min(len - progress, fragment8Bytes * 8);
 		bool last = fragmentLength == len - progress;
 

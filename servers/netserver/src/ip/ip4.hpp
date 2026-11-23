@@ -202,7 +202,7 @@ struct Ip4 {
 	async::result<std::optional<Ip4TargetInfo>> targetByRemote(uint32_t, std::shared_ptr<nic::Link> link = {});
 	async::result<protocols::fs::Error> sendFrame(Ip4TargetInfo,
 		void*, size_t,
-		uint16_t);
+		uint16_t, async::cancellation_token cancellation = {});
 private:
 	struct FragmentedPacket {
 		struct Fragment {

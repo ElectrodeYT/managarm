@@ -188,7 +188,7 @@ async::detached entryProber(uint32_t ip, Neighbours::Entry &e, uint32_t sender) 
 } // namespace
 
 async::result<std::optional<nic::MacAddress>> Neighbours::tryResolve(uint32_t ip,
-		uint32_t sender) {
+		uint32_t sender, async::cancellation_token cancellation) {
 	auto &entry = getEntry(ip);
 	if (entry.state == State::reachable) {
 		co_return entry.mac;
@@ -196,8 +196,7 @@ async::result<std::optional<nic::MacAddress>> Neighbours::tryResolve(uint32_t ip
 	if (entry.state != State::probe) {
 		entryProber(ip, entry, sender);
 	}
-	co_await entry.change.async_wait();
-	if (entry.state != State::reachable) {
+	if (!co_await entry.change.async_wait(cancellation) || entry.state != State::reachable) {
 		co_return std::nullopt;
 	}
 	co_return entry.mac;
