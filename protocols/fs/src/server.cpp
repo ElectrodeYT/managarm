@@ -941,6 +941,7 @@ struct HandleFileRequest {
 		optbuf.resize(req.optlen());
 
 		managarm::fs::SvrResponse resp;
+		bool socketError = req.layer() == SOL_SOCKET && req.number() == SO_ERROR;
 
 		if(!file_ops->getSocketOption) {
 			std::cout << "protocols/fs: getsockopt not supported on socket" << std::endl;
@@ -956,6 +957,10 @@ struct HandleFileRequest {
 
 		auto ret = co_await file_ops->getSocketOption(file.get(), recv_creds.credentials(),
 			req.layer(), req.number(), optbuf);
+		if(socketError && !ret && ret.error() == Error::invalidProtocolOption) {
+			optbuf.assign(std::min<size_t>(req.optlen(), sizeof(int)), 0);
+			ret = {};
+		}
 		if(!ret) {
 			assert(ret.error() != protocols::fs::Error::none);
 			resp.set_error(ret.error() | toFsError);

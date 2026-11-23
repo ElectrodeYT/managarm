@@ -39,7 +39,9 @@ enum Errors {
 	BAD_FILE_DESCRIPTOR = 36,
 	IO_ERROR = 37,
 	BUSY = 38,
-	NO_MEMORY = 39
+	NO_MEMORY = 39,
+	CONNECTION_RESET = 40,
+	TIMED_OUT = 41
 }
 
 consts FileType int64 {

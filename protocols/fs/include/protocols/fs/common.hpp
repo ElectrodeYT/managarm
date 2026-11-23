@@ -60,6 +60,8 @@ enum class Error {
 	ioError = 37,
 	busy = 38,
 	noMemory = 39,
+	connectionReset = 40,
+	timedOut = 41,
 };
 
 struct ToFsError {
@@ -109,6 +111,8 @@ inline managarm::fs::Errors operator|(Error e, ToFsError) {
 		case Error::ioError: return managarm::fs::Errors::IO_ERROR;
 		case Error::busy: return managarm::fs::Errors::BUSY;
 		case Error::noMemory: return managarm::fs::Errors::NO_MEMORY;
+		case Error::connectionReset: return managarm::fs::Errors::CONNECTION_RESET;
+		case Error::timedOut: return managarm::fs::Errors::TIMED_OUT;
 	}
 }
 
@@ -159,6 +163,8 @@ inline Error operator|(managarm::fs::Errors e, ToFsProtoError) {
 		case managarm::fs::Errors::IO_ERROR: return Error::ioError;
 		case managarm::fs::Errors::BUSY: return Error::busy;
 		case managarm::fs::Errors::NO_MEMORY: return Error::noMemory;
+		case managarm::fs::Errors::CONNECTION_RESET: return Error::connectionReset;
+		case managarm::fs::Errors::TIMED_OUT: return Error::timedOut;
 	}
 }
 
