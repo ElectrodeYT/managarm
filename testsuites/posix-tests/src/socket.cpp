@@ -17,6 +17,10 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <array>
+#include <string_view>
+#include <thread>
+
 #include "testsuite.hpp"
 
 DEFINE_TEST(socket_accept_timeout, ([] {
@@ -559,5 +563,175 @@ DEFINE_TEST(socket_tcp_timeouts, ([] {
 
 	close(server);
 	close(client);
+	close(listener);
+}));
+
+namespace {
+
+std::pair<int, sockaddr_in> tcpListener(bool startListening = true) {
+	int listener = socket(AF_INET, SOCK_STREAM, 0);
+	assert(listener >= 0);
+	sockaddr_in addr{};
+	addr.sin_family = AF_INET;
+	addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+	assert(bind(listener, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) == 0);
+	if(startListening)
+		assert(listen(listener, 4) == 0);
+	socklen_t len = sizeof(addr);
+	assert(getsockname(listener, reinterpret_cast<sockaddr *>(&addr), &len) == 0);
+	return {listener, addr};
+}
+
+std::pair<int, int> tcpConnect(int listener, sockaddr_in addr) {
+	int client = socket(AF_INET, SOCK_STREAM, 0);
+	assert(client >= 0);
+	assert(connect(client, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) == 0);
+	int server = accept(listener, nullptr, nullptr);
+	assert(server >= 0);
+	return {client, server};
+}
+
+void waitForTcpData(int fd) {
+	pollfd ready{.fd = fd, .events = POLLIN};
+	assert(poll(&ready, 1, 2000) == 1 && (ready.revents & POLLIN));
+}
+
+} // namespace
+
+DEFINE_TEST(socket_tcp_refused, ([] {
+	auto [listener, addr] = tcpListener(false);
+	int client = socket(AF_INET, SOCK_STREAM, 0);
+	assert(client >= 0);
+	assert(connect(client, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) == -1);
+	assert(errno == ECONNREFUSED);
+	assert(listen(listener, 4) == 0);
+#ifdef __managarm__
+	// Netserver restores the socket's binding and permits reuse after a refused open.
+	assert(connect(client, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) == 0);
+#else
+	close(client);
+	client = socket(AF_INET, SOCK_STREAM, 0);
+	assert(client >= 0);
+	assert(connect(client, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) == 0);
+#endif
+	int server = accept(listener, nullptr, nullptr);
+	assert(server >= 0);
+	close(server);
+	close(client);
+	close(listener);
+}));
+
+DEFINE_TEST(socket_tcp_reset, ([] {
+	auto [listener, addr] = tcpListener();
+	auto [client, server] = tcpConnect(listener, addr);
+	auto [otherClient, otherServer] = tcpConnect(listener, addr);
+	assert(write(client, "x", 1) == 1);
+	waitForTcpData(server);
+	close(server); // Abort with unread data.
+	pollfd ready{.fd = client, .events = POLLIN};
+	assert(poll(&ready, 1, 2000) == 1);
+	assert((ready.revents & (POLLERR | POLLHUP)) == (POLLERR | POLLHUP));
+	int error = 0;
+	socklen_t size = sizeof(error);
+	assert(getsockopt(client, SOL_SOCKET, SO_ERROR, &error, &size) == 0);
+	assert(size == sizeof(error) && error == ECONNRESET);
+	assert(getsockopt(client, SOL_SOCKET, SO_ERROR, &error, &size) == 0 && error == 0);
+	char byte;
+	assert(read(client, &byte, 1) == 0);
+	close(client);
+
+	// Resetting one child leaves siblings on the listener port connected.
+	assert(write(otherClient, "y", 1) == 1);
+	waitForTcpData(otherServer);
+	assert(read(otherServer, &byte, 1) == 1 && byte == 'y');
+	close(otherClient);
+	waitForTcpData(otherServer);
+	assert(read(otherServer, &byte, 1) == 0);
+	close(otherServer);
+	close(listener);
+}));
+
+DEFINE_TEST(socket_tcp_reset_wakes_read, ([] {
+	auto [listener, addr] = tcpListener();
+	auto [client, server] = tcpConnect(listener, addr);
+	assert(write(client, "x", 1) == 1);
+	waitForTcpData(server);
+	timeval timeout{.tv_sec = 2};
+	assert(setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) == 0);
+	std::thread closer([&] {
+		timespec delay{.tv_nsec = 25'000'000};
+		nanosleep(&delay, nullptr);
+		close(server);
+	});
+	char byte;
+	assert(recv(client, &byte, 1, 0) == -1 && errno == ECONNRESET);
+	closer.join();
+	close(client);
+	close(listener);
+}));
+
+DEFINE_TEST(socket_tcp_wire, ([] {
+	if(!getenv("MANAGARM_TCP_WIRE"))
+		skip_test("requires the scripted QEMU TCP peer");
+	using namespace std::string_view_literals;
+
+	auto address = [](const char *ip, uint16_t port) {
+		sockaddr_in addr{.sin_family = AF_INET, .sin_port = htons(port)};
+		assert(inet_pton(AF_INET, ip, &addr.sin_addr) == 1);
+		return addr;
+	};
+	auto openSocket = [] {
+		int fd = socket(AF_INET, SOCK_STREAM, 0);
+		assert(fd >= 0);
+		timeval timeout{.tv_sec = 20};
+		assert(setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) == 0);
+		return fd;
+	};
+	auto local = address("10.24.5.2", 15670);
+	int listener = openSocket();
+	assert(bind(listener, reinterpret_cast<sockaddr *>(&local), sizeof(local)) == 0);
+	assert(listen(listener, 4) == 0);
+
+	auto remote = address("10.24.5.1", 15671);
+	for(char response : "RP"sv) {
+		int client = openSocket();
+		assert(connect(client, reinterpret_cast<sockaddr *>(&remote), sizeof(remote)) == 0);
+		assert(write(client, "abcdef", 6) == 6);
+		char byte;
+		assert(read(client, &byte, 1) == 1 && byte == response);
+		close(client);
+	}
+
+	int abortClient = openSocket();
+	assert(connect(abortClient, reinterpret_cast<sockaddr *>(&remote), sizeof(remote)) == 0);
+	assert(write(abortClient, "z", 1) == 1);
+	pollfd ready{.fd = abortClient, .events = POLLIN};
+	assert(poll(&ready, 1, 20000) == 1 && (ready.revents & POLLIN));
+	close(abortClient); // Abort with unread peer data after a zero-window probe.
+
+	int child = accept(listener, nullptr, nullptr);
+	assert(child >= 0);
+	std::array<char, 12 * 256> output;
+	for(size_t i = 0; i < output.size(); ++i)
+		output[i] = 'a' + i / 256;
+	assert(write(child, output.data(), output.size()) == ssize_t(output.size()));
+	char data[7];
+	size_t readBytes = 0;
+	while(readBytes < sizeof(data)) {
+		auto n = read(child, data + readBytes, sizeof(data) - readBytes);
+		assert(n > 0);
+		readBytes += n;
+	}
+	assert(std::string_view(data, sizeof(data)) == "abcdefg");
+	assert(read(child, data, 1) == 0);
+	close(child);
+
+	int resetChild = accept(listener, nullptr, nullptr);
+	assert(resetChild >= 0);
+	assert(write(resetChild, "!", 1) == 1);
+	char byte;
+	assert(read(resetChild, &byte, 1) == -1 && errno == ECONNRESET);
+	close(resetChild);
+
 	close(listener);
 }));
