@@ -10,16 +10,13 @@ void Checksum::update(uint16_t word)  {
 }
 
 void Checksum::update(const void *data, size_t size) {
-	using namespace arch;
 	auto iter = static_cast<const unsigned char*>(data);
-	if (size % 2 != 0) {
-		size--;
-		update(iter[size] << 8);
-	}
-	auto end = iter + size;
+	auto end = iter + (size & ~size_t{1});
 	for (; iter < end; iter += 2) {
 		update(iter[0] << 8 | iter[1]);
 	}
+	if (size & 1)
+		update(iter[0] << 8);
 }
 
 void Checksum::update(arch::dma_buffer_view view) {
